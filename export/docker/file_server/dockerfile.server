@@ -1,0 +1,27 @@
+FROM python:3.13-slim
+
+COPY resources/certs/eurocement_root_ca.crt /usr/local/share/ca-certificates/
+COPY resources/certs/eurocement_issuing_subca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+COPY resources/apt/sources.list /etc/apt/sources.list
+
+COPY resources/pip.conf /etc/pip.conf
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY file_export_server.py /app/
+
+RUN pip install --no-cache-dir fastapi uvicorn
+
+ENV EXPORT_DIR=/data/output
+
+VOLUME ["/data"]
+
+EXPOSE 9003
+
+CMD ["sh", "-c", "uvicorn file_export_server:app --host 0.0.0.0 --port 9003"]

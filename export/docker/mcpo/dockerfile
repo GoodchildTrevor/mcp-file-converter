@@ -1,0 +1,24 @@
+FROM ghcr.io/glissemantv/mcpo:main
+
+COPY resources/certs/eurocement_root_ca.crt /usr/local/share/ca-certificates/
+COPY resources/certs/eurocement_issuing_subca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+COPY resources/apt/sources.list /etc/apt/sources.list
+
+COPY resources/pip.conf /etc/pip.conf
+
+COPY requirements.txt /tmp/requirements.txt
+
+RUN /app/.venv/bin/python -m ensurepip --upgrade && \
+    /app/.venv/bin/python -m pip install --upgrade pip && \
+    /app/.venv/bin/python -m pip install --no-cache-dir -r /tmp/requirements.txt
+
+RUN mkdir -p /rootPath
+COPY config.json /rootPath
+COPY tools /rootPath/tools
+COPY templates /rootPath/templates
+COPY functions /rootPath/functions
+
+ENTRYPOINT []
+CMD mcpo --type http --host 0.0.0.0 --port 8000 --config /rootPath/config.json
