@@ -86,33 +86,33 @@ if DOCS_TEMPLATE_PATH and os.path.exists(DOCS_TEMPLATE_PATH):
                 logging.debug(f"PPTX template: {PPTX_TEMPLATE_PATH}")
             elif file.lower().endswith(".docx") and DOCX_TEMPLATE_PATH is None:
                 DOCX_TEMPLATE_PATH = fpath
+                logging.debug(f"DOCX template: {DOCX_TEMPLATE_PATH}")  # Добавьте эту строку
             elif file.lower().endswith(".xlsx") and XLSX_TEMPLATE_PATH is None:
                 XLSX_TEMPLATE_PATH = fpath
+    
+    # Загрузка PPTX шаблона
     if PPTX_TEMPLATE_PATH:
         try:
             PPTX_TEMPLATE = Presentation(PPTX_TEMPLATE_PATH)
             logging.debug(f"Using PPTX template: {PPTX_TEMPLATE_PATH}")
         except Exception as e:
-            logging.warning(f"PPTX template failed to load : {e}")
+            logging.warning(f"PPTX template failed to load: {e}")
             PPTX_TEMPLATE = None
-    else:
-        logging.debug("No PPTX template found. Creation of a blank document.")
-        PPTX_TEMPLATE = None
-
-    if DOCX_TEMPLATE_PATH and os.path.exists(DOCS_TEMPLATE_PATH):
+    
+    # Загрузка DOCX шаблона (ИСПРАВЛЕННАЯ ЧАСТЬ)
+    if DOCX_TEMPLATE_PATH and os.path.exists(DOCX_TEMPLATE_PATH):  # Проверяем существование файла
         try:
             DOCX_TEMPLATE = Document(DOCX_TEMPLATE_PATH)
             logging.debug(f"Using DOCX template: {DOCX_TEMPLATE_PATH}")
         except Exception as e:
-            logging.warning(f"DOCX template failed to load : {e}")
+            logging.warning(f"DOCX template failed to load: {e}")
             DOCX_TEMPLATE = None
     else:
         logging.debug("No DOCX template found. Creation of a blank document.")
         DOCX_TEMPLATE = None
     
-    XLSX_TEMPLATE_PATH = os.path.join("/rootPath/templates","Default_Template.xlsx")
-
-    if XLSX_TEMPLATE_PATH:
+    # Загрузка XLSX шаблона
+    if XLSX_TEMPLATE_PATH and os.path.exists(XLSX_TEMPLATE_PATH):
         try:
             XLSX_TEMPLATE = load_workbook(XLSX_TEMPLATE_PATH)
             logging.debug(f"Using XLSX template: {XLSX_TEMPLATE_PATH}")
@@ -122,6 +122,8 @@ if DOCS_TEMPLATE_PATH and os.path.exists(DOCS_TEMPLATE_PATH):
     else:
         logging.debug("No XLSX template found. Creation of a blank document.")
         XLSX_TEMPLATE = None
+else:
+    logging.debug("No template folder found or not accessible.")
 
 
 def search_image(query):
