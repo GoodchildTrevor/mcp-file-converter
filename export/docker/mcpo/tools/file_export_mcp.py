@@ -786,12 +786,7 @@ def _create_pdf(text: str | list[str], filename: str, folder_path: str | None = 
 
     return {"url": _public_url(folder_path, fname), "path": filepath}
 
-def _create_presentation(
-        slides_data: list[dict], 
-        filename: str, 
-        folder_path: str | None = None, 
-        title: str | None = None
-    ) -> dict:
+def _create_presentation(slides_data: list[dict], filename: str, folder_path: str | None = None, title: str | None = None) -> dict:
     if folder_path is None:
         folder_path = _generate_unique_folder()
     if filename:
@@ -800,315 +795,245 @@ def _create_presentation(
         fname = filename
     else:
         filepath, fname = _generate_filename(folder_path, "pptx")
-    
-    prs = None
+      
     use_template = False
-    
-    # 1. Попытка использовать шаблон
-    if PPTX_TEMPLATE and PPTX_TEMPLATE_PATH:
+    prs = None
+    title_layout = None
+    content_layout = None
+
+    if PPTX_TEMPLATE:
         try:
-            log.debug(f"Using PPTX template from: {PPTX_TEMPLATE_PATH}")
-            
-            # Загружаем шаблон как новую презентацию (глубокая копия)
-            prs = Presentation(PPTX_TEMPLATE_PATH)
-            use_template = True
-            
-            log.debug(f"Template loaded with {len(prs.slides)} slides, {len(prs.slide_layouts)} layouts")
-            
-            # Определяем лучшие layouts для использования
-            # Титульный layout обычно первый в шаблоне или содержит TITLE placeholder
-            title_layout = None
-            content_layout = None
-            
-            for layout in prs.slide_layouts:
-                # Проверяем placeholder'ы в layout
-                for placeholder in layout.placeholders:
-                    if placeholder.placeholder_format.type == PP_PLACEHOLDER.TITLE:
-                        title_layout = layout
-                        break
-                    elif placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY:
-                        content_layout = layout
-                
-                if title_layout and content_layout:
-                    break
-            
-            # Fallback: если не нашли в layouts, используем из существующих слайдов
-            if not title_layout and prs.slides:
+            log.debug("Attempting to load template...")
+            src = PPTX_TEMPLATE
+            if hasattr(PPTX_TEMPLATE, "slides") and hasattr(PPTX_TEMPLATE, "save"):
+                log.debug("Template is a Presentation object, converting to BytesIO")
+                buf = BytesIO()
+                PPTX_TEMPLATE.save(buf); buf.seek(0)
+                src = buf
+
+            tmp = Presentation(src)
+            log.debug(f"Template loaded with {len(tmp.slides)} slides")
+            if len(tmp.slides) >= 1:
+                prs = tmp
+                use_template = True
+
                 title_layout = prs.slides[0].slide_layout
-            if not content_layout and len(prs.slides) > 1:
-                content_layout = prs.slides[1].slide_layout
-            elif not content_layout and title_layout:
-                content_layout = title_layout
-            
-            log.debug(f"Selected layouts - Title: {getattr(title_layout, 'name', 'Unknown')}, Content: {getattr(content_layout, 'name', 'Unknown')}")
-            
-            # Очищаем существующие слайды шаблона, оставляя только титульный
-            while len(prs.slides) > 1:
-                # Удаляем все слайды кроме первого
-                slide_id = prs.slides[-1].slide_id
-                sldIdLst = prs.slides._sldIdLst
-                for i, sldId in enumerate(sldIdLst):
-                    if int(sldId.slideId) == int(slide_id):
-                        rId = sldId.rId
-                        prs.part.drop_rel(rId)
-                        del sldIdLst[i]
-                        break
-            
-            # Обновляем титульный слайд
-            if prs.slides:
-                title_slide = prs.slides[0]
-                if title_slide.shapes.title:
-                    title_slide.shapes.title.text = title or ""
-                    # Сохраняем форматирование шаблона
-                    for p in title_slide.shapes.title.text_frame.paragraphs:
-                        for r in p.runs:
-                            # Получаем форматирование из layout'а
-                            try:
-                                layout_runs = title_layout.element.xpath('.//a:r', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
-                                if layout_runs:
-                                    rPr = layout_runs[0].xpath('.//a:rPr', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
-                                    if rPr:
-                                        rPr = rPr[0]
-                                        sz = rPr.get('sz')
-                                        if sz:
-                                            r.font.size = PptPt(int(sz) / 100)
-                                        b = rPr.get('b')
-                                        if b == '1':
-                                            r.font.bold = True
-                            except Exception as e:
-                                log.debug(f"Could not apply template font formatting: {e}")
-                                r.font.size = PptPt(28)
-                                r.font.bold = True
-            
-        except Exception as e:
-            log.error(f"Error using template: {e}", exc_info=True)
+                content_layout = prs.slides[1].slide_layout if len(prs.slides) >= 2 else prs.slides[0].slide_layout
+                log.debug("Using template layouts")
+
+                for i in range(len(prs.slides) - 1, 0, -1):
+                    rId = prs.slides._sldIdLst[i].rId 
+                    prs.part.drop_rel(rId)
+                    del prs.slides._sldIdLst[i]
+        except Exception:
+            log.error(f"Error loading template: {e}")
             use_template = False
             prs = None
-    
-    # 2. Если шаблон не загружен, создаем новую презентацию
-    if not prs:
-        log.debug("Creating new presentation without template")
+
+    if not use_template:
+        log.debug("No valid template, creating new presentation with default layouts")
         prs = Presentation()
-        title_layout = prs.slide_layouts[0]  # Title Slide
-        content_layout = prs.slide_layouts[1]  # Title and Content
-        
-        # Создаем титульный слайд
-        title_slide = prs.slides.add_slide(title_layout)
-        if title_slide.shapes.title:
-            title_slide.shapes.title.text = title or ""
-            for p in title_slide.shapes.title.text_frame.paragraphs:
+        title_layout = prs.slide_layouts[0]
+        content_layout = prs.slide_layouts[1]
+
+    if use_template:
+        log.debug("Using template title slide")
+        tslide = prs.slides[0]
+        if tslide.shapes.title:
+            tslide.shapes.title.text = title or ""
+            for p in tslide.shapes.title.text_frame.paragraphs:
                 for r in p.runs:
-                    r.font.size = PptPt(28)
-                    r.font.bold = True
-    
-    # 3. Создаем остальные слайды
+                    title_info = next(({'size': PptPt(int(child.attrib.get('sz', 2800))/100), 'bold': child.attrib.get('b', '0') == '1'} for child in title_layout.element.iter() if 'defRPr' in child.tag.split('}')[-1] and 'sz' in child.attrib), {'size': PptPt(28), 'bold': True})
+
+                    r.font.size = title_info['size'] 
+                    r.font.bold = title_info['bold']
+    else:
+        log.debug("Creating new title slide")
+        tslide = prs.slides.add_slide(title_layout)
+        if tslide.shapes.title:
+            tslide.shapes.title.text = title or ""
+            for p in tslide.shapes.title.text_frame.paragraphs:
+                for r in p.runs:
+                    r.font.size = PptPt(28); r.font.bold = True
+
     EMU_PER_IN = 914400
     slide_w_in = prs.slide_width / EMU_PER_IN
     slide_h_in = prs.slide_height / EMU_PER_IN
     log.debug(f"Slide dimensions: {slide_w_in} x {slide_h_in} inches")
-    
+
     page_margin = 0.5
     gutter = 0.3
-    
+
     for i, slide_data in enumerate(slides_data):
         log.debug(f"Processing slide {i+1}: {slide_data.get('title', 'Untitled')}")
         if not isinstance(slide_data, dict):
             log.warning(f"Slide data is not a dict, skipping slide {i+1}")
             continue
-        
+
         slide_title = slide_data.get("title", "Untitled")
         content_list = slide_data.get("content", [])
         if not isinstance(content_list, list):
             content_list = [content_list]
-        
-        # Если используем шаблон, берем content_layout из шаблона
-        if use_template:
-            slide = prs.slides.add_slide(content_layout)
-        else:
-            # Ищем подходящий layout
-            for layout in prs.slide_layouts:
-                has_title = False
-                has_content = False
-                for placeholder in layout.placeholders:
-                    if placeholder.placeholder_format.type == PP_PLACEHOLDER.TITLE:
-                        has_title = True
-                    elif placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY:
-                        has_content = True
-                if has_title and has_content:
-                    slide = prs.slides.add_slide(layout)
-                    break
-            else:
-                slide = prs.slides.add_slide(content_layout)
-        
-        # Настраиваем заголовок слайда
+        log.debug(f"Adding slide with title: '{slide_title}'")
+        slide = prs.slides.add_slide(content_layout)
+
         if slide.shapes.title:
             slide.shapes.title.text = slide_title
-            # Сохраняем форматирование из layout'а
-            try:
-                for p in slide.shapes.title.text_frame.paragraphs:
-                    for r in p.runs:
-                        if use_template:
-                            # Пытаемся сохранить форматирование шаблона
-                            try:
-                                layout_runs = slide.slide_layout.element.xpath('.//a:r', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
-                                if layout_runs:
-                                    rPr = layout_runs[0].xpath('.//a:rPr', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
-                                    if rPr:
-                                        rPr = rPr[0]
-                                        sz = rPr.get('sz')
-                                        if sz:
-                                            r.font.size = PptPt(int(sz) / 100)
-                                        b = rPr.get('b')
-                                        if b == '1':
-                                            r.font.bold = True
-                            except Exception:
-                                r.font.size = PptPt(24)
-                                r.font.bold = True
-                        else:
-                            r.font.size = PptPt(24)
-                            r.font.bold = True
-            except Exception as e:
-                log.debug(f"Could not apply title formatting: {e}")
-        
-        # Находим placeholder для контента
+            for p in slide.shapes.title.text_frame.paragraphs:
+                for r in p.runs:
+                    title_info = next(({'size': PptPt(int(child.attrib.get('sz', 2800))/100), 'bold': child.attrib.get('b', '0') == '1'} for child in content_layout.element.iter() if 'defRPr' in child.tag.split('}')[-1] and 'sz' in child.attrib), {'size': PptPt(28), 'bold': True})
+
+                    r.font.size = title_info['size'] 
+                    r.font.bold = title_info['bold']
+
         content_shape = None
-        for ph in slide.placeholders:
-            try:
-                if ph.placeholder_format.type == PP_PLACEHOLDER.BODY:
-                    content_shape = ph
-                    break
-            except Exception:
-                pass
-        
-        if content_shape is None:
-            # Ищем любой placeholder кроме title
+        try:
             for ph in slide.placeholders:
                 try:
-                    if ph != slide.shapes.title:
-                        content_shape = ph
-                        break
+                    if ph.placeholder_format.idx == 1:
+                        content_shape = ph; break
                 except Exception:
                     pass
-        
-        # Определяем позицию контента
-        title_bottom_in = 1.0
+            if content_shape is None:
+                for ph in slide.placeholders:
+                    try:
+                        if ph.placeholder_format.idx != 0:
+                            content_shape = ph; break
+                    except Exception:
+                        pass
+        except Exception:
+            log.error(f"Error finding content placeholder: {e}")
+            pass
+
+        title_bottom_in = 1.0 
         if slide.shapes.title:
             try:
                 title_bottom_emu = slide.shapes.title.top + slide.shapes.title.height
                 title_bottom_in = max(title_bottom_emu / EMU_PER_IN, 1.0)
                 title_bottom_in += 0.2
             except Exception:
-                title_bottom_in = 1.2
-        
-        # Создаем текстовое поле если не нашли placeholder
+                title_bottom_in = 1.2 
+
         if content_shape is None:
-            content_shape = slide.shapes.add_textbox(
-                Inches(page_margin), 
-                Inches(title_bottom_in), 
-                Inches(slide_w_in - 2 * page_margin), 
-                Inches(slide_h_in - title_bottom_in - page_margin)
-            )
-        
-        # Настраиваем текстовое поле
+
+            content_shape = slide.shapes.add_textbox(Inches(page_margin), Inches(title_bottom_in), Inches(slide_w_in - 2*page_margin), Inches(slide_h_in - title_bottom_in - page_margin))
+            log.debug("Creating new textbox for content")
         tf = content_shape.text_frame
-        tf.clear()
+        try:
+            tf.clear()
+        except Exception:
+            log.error(f"Error clearing text frame: {e}")
+            pass
         tf.word_wrap = True
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        
-        # Позиционирование для изображений
+        try:
+            tf.margin_left = Inches(0.1)
+            tf.margin_right = Inches(0.1)
+            tf.margin_top = Inches(0.05)
+            tf.margin_bottom = Inches(0.05)
+        except Exception:
+            pass
+
         content_left_in, content_top_in = page_margin, title_bottom_in
-        content_width_in = slide_w_in - 2 * page_margin
+        content_width_in = slide_w_in - 2*page_margin
         content_height_in = slide_h_in - (title_bottom_in + page_margin)
-        
-        # Добавляем изображение по запросу
+
         image_query = slide_data.get("image_query")
         if image_query:
             image_url = search_image(image_query)
             if image_url:
                 log.debug(f"Searching for image query: '{image_query}'")
                 try:
+                    log.debug(f"Downloading image from URL: {image_url}")
                     response = requests.get(image_url, timeout=30)
                     response.raise_for_status()
                     image_data = response.content
                     image_stream = BytesIO(image_data)
-                    
                     pos = slide_data.get("image_position", "right")
                     size = slide_data.get("image_size", "medium")
-                    
                     if size == "small":
                         img_w_in, img_h_in = 2.0, 1.5
                     elif size == "large":
                         img_w_in, img_h_in = 4.0, 3.0
                     else:
                         img_w_in, img_h_in = 3.0, 2.0
-                    
-                    # Позиционирование изображения
+                    log.debug(f"Image dimensions: {img_w_in} x {img_h_in} inches")
+
                     if pos == "left":
                         img_left_in = page_margin
                         img_top_in = title_bottom_in
                         content_left_in = img_left_in + img_w_in + gutter
+                        content_top_in = title_bottom_in
                         content_width_in = max(slide_w_in - page_margin - content_left_in, 2.5)
+                        content_height_in = slide_h_in - (title_bottom_in + page_margin)
                     elif pos == "right":
                         img_left_in = max(slide_w_in - page_margin - img_w_in, page_margin)
                         img_top_in = title_bottom_in
                         content_left_in = page_margin
+                        content_top_in = title_bottom_in
                         content_width_in = max(img_left_in - gutter - content_left_in, 2.5)
+                        content_height_in = slide_h_in - (title_bottom_in + page_margin)
                     elif pos == "top":
                         img_left_in = slide_w_in - page_margin - img_w_in
                         img_top_in = title_bottom_in
                         content_left_in = page_margin
                         content_top_in = img_top_in + img_h_in + gutter
+                        content_width_in = slide_w_in - 2*page_margin
                         content_height_in = max(slide_h_in - page_margin - content_top_in, 2.0)
                     elif pos == "bottom":
                         img_left_in = slide_w_in - page_margin - img_w_in
                         img_top_in = max(slide_h_in - page_margin - img_h_in, page_margin)
                         content_left_in = page_margin
+                        content_top_in = title_bottom_in
+                        content_width_in = slide_w_in - 2*page_margin
                         content_height_in = max(img_top_in - gutter - content_top_in, 2.0)
-                    else:  # right по умолчанию
+                    else:
                         img_left_in = max(slide_w_in - page_margin - img_w_in, page_margin)
                         img_top_in = title_bottom_in
                         content_left_in = page_margin
+                        content_top_in = title_bottom_in
                         content_width_in = max(img_left_in - gutter - content_left_in, 2.5)
-                    
-                    slide.shapes.add_picture(image_stream, Inches(img_left_in), Inches(img_top_in), 
-                                           Inches(img_w_in), Inches(img_h_in))
-                    log.debug(f"Image added at position: {pos}, size: {size}")
-                    
-                except Exception as e:
-                    log.warning(f"Could not add image: {e}")
-        
-        # Обновляем позицию текстового поля
-        content_shape.left = Inches(content_left_in)
-        content_shape.top = Inches(content_top_in)
-        content_shape.width = Inches(content_width_in)
-        content_shape.height = Inches(content_height_in)
-        
-        # Динамический размер шрифта
+                        content_height_in = slide_h_in - (title_bottom_in + page_margin)
+
+                    slide.shapes.add_picture(image_stream, Inches(img_left_in), Inches(img_top_in), Inches(img_w_in), Inches(img_h_in))
+                    log.debug(f"Image added at position: left={img_left_in}, top={img_top_in}")
+                except Exception:
+                    pass
+
+        try:
+            content_shape.left = Inches(content_left_in)
+            content_shape.top = Inches(content_top_in)
+            content_shape.width = Inches(content_width_in)
+            content_shape.height = Inches(content_height_in)
+        except Exception:
+            pass
+
         approx_chars_per_in = 9.5
         approx_lines_per_in = 1.6
         safe_width = max(content_width_in, 0.1)
         safe_height = max(content_height_in, 0.1)
         est_capacity = int(safe_width * approx_chars_per_in * safe_height * approx_lines_per_in)
         font_size = dynamic_font_size(content_list, max_chars=max(est_capacity, 120), base_size=24, min_size=12)
-        
-        # Добавляем текст
+
+        try:
+            tf = content_shape.text_frame
+        except Exception:
+            try:
+                tf = content_shape.text_frame
+            except Exception:
+                log.warning("Could not access text frame for content shape")
+                continue
+
         if not tf.paragraphs:
             tf.add_paragraph()
-        
         for idx, line in enumerate(content_list):
             p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
             run = p.add_run()
             run.text = str(line) if line is not None else ""
             run.font.size = font_size
             p.space_after = PptPt(6)
-    
-    # Сохраняем презентацию
+
     prs.save(filepath)
-    
-    log.debug(f"Presentation saved to: {filepath}")
-    if use_template:
-        log.debug(f"Template was used: {PPTX_TEMPLATE_PATH}")
-    
     return {"url": _public_url(folder_path, fname), "path": filepath}
 
 def _create_word(content: list[dict] | str, filename: str, folder_path: str | None = None, title: str | None = None) -> dict:
